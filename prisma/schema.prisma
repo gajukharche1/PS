@@ -1,0 +1,451 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ListingStatus {
+  draft
+  pending_review
+  published
+  rejected
+  expired
+  archived
+}
+
+enum ClaimStatus {
+  unclaimed
+  claim_pending
+  claimed
+  verified
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  spam
+  trashed
+}
+
+enum UserRole {
+  visitor
+  owner
+  moderator
+  admin
+}
+
+enum UserStatus {
+  active
+  suspended
+  locked
+}
+
+enum ClaimRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum MediaScanStatus {
+  pending
+  clean
+  infected
+}
+
+enum DataRequestType {
+  export
+  erasure
+}
+
+enum DataRequestStatus {
+  pending
+  processing
+  completed
+  rejected
+}
+
+model User {
+  id                 String     @id @default(cuid())
+  email              String     @unique
+  emailVerifiedAt    DateTime?
+  passwordHash       String
+  name               String
+  phone              String?
+  role               UserRole   @default(visitor)
+  status             UserStatus @default(active)
+  lastLoginAt        DateTime?
+  failedLoginCount   Int        @default(0)
+  lockedUntil        DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  listings           Listing[]
+  reviews            Review[]
+  claims             ClaimRequest[]
+  favourites         Favourite[]
+  sessions           Session[]
+  media              Media[]
+  dataRequests       PersonalDataRequest[]
+
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  sessionToken String   @unique
+  expires      DateTime
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@map("email_verification_tokens")
+}
+
+model PricingPlan {
+  id                 String    @id @default(cuid())
+  name               String    @unique
+  slug               String    @unique
+  priceMinor         Int       @default(0) // In paise (e.g. 99900 = 999 INR)
+  currency           String    @default("INR")
+  billingPeriodDays  Int       @default(365)
+  maxPhotos          Int       @default(5)
+  maxCategories      Int       @default(1)
+  maxLocations       Int       @default(1)
+  featuredAllowed    Boolean   @default(false)
+  badgeVisible       Boolean   @default(false)
+  callButtonAllowed  Boolean   @default(true)
+  whatsappAllowed    Boolean   @default(true)
+  searchPriority     Int       @default(1)
+  displayOrder       Int       @default(1)
+  isActive           Boolean   @default(true)
+  description        String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  listings           Listing[]
+  auditLogs          PlanAuditLog[]
+
+  @@map("pricing_plans")
+}
+
+model PlanAuditLog {
+  id        String      @id @default(cuid())
+  planId    String
+  changedBy String
+  field     String
+  oldValue  String?
+  newValue  String?
+  note      String?
+  createdAt DateTime    @default(now())
+
+  plan      PricingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@map("plan_audit_log")
+}
+
+model Category {
+  id             String            @id @default(cuid())
+  parentId       String?
+  slug           String            @unique
+  name           String
+  description    String?
+  icon           String?           // Lucide icon name or SVG key
+  coverImage     String?
+  featuredOnHome Boolean           @default(false)
+  sortOrder      Int               @default(0)
+  listingCount   Int               @default(0)
+  seoTitle       String?
+  seoDescription String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  parent         Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Category[]        @relation("CategoryHierarchy")
+  listings       ListingCategory[]
+
+  @@index([parentId])
+  @@index([featuredOnHome])
+  @@map("categories")
+}
+
+model Location {
+  id             String            @id @default(cuid())
+  parentId       String?
+  slug           String            @unique
+  name           String
+  description    String?
+  latitude       Decimal?          @db.Decimal(10, 8)
+  longitude      Decimal?          @db.Decimal(11, 8)
+  coverImage     String?
+  featured       Boolean           @default(false)
+  sortOrder      Int               @default(0)
+  listingCount   Int               @default(0)
+  seoTitle       String?
+  seoDescription String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  parent         Location?         @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Location[]        @relation("LocationHierarchy")
+  listings       ListingLocation[]
+
+  @@index([parentId])
+  @@index([featured])
+  @@map("locations")
+}
+
+model Listing {
+  id             String            @id @default(cuid())
+  slug           String            @unique
+  title          String
+  description    String            // Sanitized rich text
+  status         ListingStatus     @default(pending_review)
+  ownerId        String?
+  claimStatus    ClaimStatus       @default(unclaimed)
+  featured       Boolean           @default(false)
+  priority       Int               @default(0)
+  planId         String?
+  planStartedAt  DateTime?
+  planExpiresAt  DateTime?
+  viewCount      BigInt            @default(0)
+  averageRating  Decimal           @default(0.00) @db.Decimal(3, 2)
+  reviewCount    Int               @default(0)
+
+  // Contact & Spatial Details
+  phone          String?
+  whatsapp       String?
+  email          String?           // Private contact email
+  website        String?
+  address        String
+  locality       String            // Local neighborhood in Pimple Saudagar
+  landmark       String?
+  latitude       Decimal?          @db.Decimal(10, 8)
+  longitude      Decimal?          @db.Decimal(11, 8)
+  googlePlaceId  String?
+  serviceArea    String?
+  yearEstablished Int?
+  priceRange     Int               @default(1) // 1 to 4 ($ to $$$$)
+  openingHours   Json?             // Structured weekly hours
+  amenities      String[]          @default([])
+  socialLinks    Json?             // { facebook, instagram, linkedin, x, youtube }
+
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  publishedAt    DateTime?
+
+  owner          User?             @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  plan           PricingPlan?      @relation(fields: [planId], references: [id], onDelete: SetNull)
+  categories     ListingCategory[]
+  locations      ListingLocation[]
+  reviews        Review[]
+  enquiries      Enquiry[]
+  claims         ClaimRequest[]
+  favourites     Favourite[]
+  media          Media[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([ownerId])
+  @@index([locality])
+  @@index([featured, priority])
+  @@index([averageRating])
+  @@map("listings")
+}
+
+model ListingCategory {
+  listingId  String
+  categoryId String
+
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, categoryId])
+  @@index([categoryId])
+  @@index([listingId])
+  @@map("listing_categories")
+}
+
+model ListingLocation {
+  listingId  String
+  locationId String
+  isPrimary  Boolean  @default(false)
+
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, locationId])
+  @@index([locationId])
+  @@index([listingId])
+  @@map("listing_locations")
+}
+
+model Review {
+  id                     String       @id @default(cuid())
+  listingId              String
+  authorId               String?
+  reviewerName           String
+  reviewerEmailHash      String       // SHA-256 peppered hash for deduplication
+  reviewerEmailEncrypted String?      // Encrypted at rest for DPDP compliance
+  rating                 Int          // 1 to 5
+  title                  String
+  body                   String
+  status                 ReviewStatus @default(pending)
+  verifiedVisit          Boolean      @default(false)
+  ownerReply             String?
+  ownerReplyAt           DateTime?
+  helpfulCount           Int          @default(0)
+  ipHash                 String?
+  userAgentHash          String?
+  moderatedBy            String?
+  moderatedAt            DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  listing                Listing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  author                 User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@unique([listingId, reviewerEmailHash])
+  @@index([listingId, status])
+  @@index([authorId])
+  @@map("reviews")
+}
+
+model Enquiry {
+  id        String    @id @default(cuid())
+  listingId String
+  name      String
+  email     String
+  phone     String?
+  message   String
+  ipHash    String?
+  isRead    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  handledAt DateTime?
+
+  listing   Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([isRead])
+  @@map("enquiries")
+}
+
+model ClaimRequest {
+  id           String             @id @default(cuid())
+  listingId    String
+  userId       String
+  proofFileUrl String
+  status       ClaimRequestStatus @default(pending)
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  note         String?
+  createdAt    DateTime           @default(now())
+
+  listing      Listing            @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([userId])
+  @@index([status])
+  @@map("claim_requests")
+}
+
+model Favourite {
+  id        String   @id @default(cuid())
+  userId    String
+  listingId String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+  @@index([userId])
+  @@map("favourites")
+}
+
+model Media {
+  id         String          @id @default(cuid())
+  listingId  String?
+  ownerId    String?
+  key        String          @unique
+  url        String
+  mimeType   String
+  bytes      Int
+  width      Int?
+  height     Int?
+  altText    String?
+  scanStatus MediaScanStatus @default(pending)
+  createdAt  DateTime        @default(now())
+
+  listing    Listing?        @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  owner      User?           @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([listingId])
+  @@index([ownerId])
+  @@map("media")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  diff      Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@map("audit_log")
+}
+
+model PersonalDataRequest {
+  id          String             @id @default(cuid())
+  userId      String
+  type        DataRequestType
+  status      DataRequestStatus  @default(pending)
+  requestedAt DateTime           @default(now())
+  completedAt DateTime?
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("personal_data_requests")
+}
