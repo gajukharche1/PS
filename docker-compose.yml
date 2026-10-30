@@ -1,4 +1,30 @@
 services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ps-web:latest
+    container_name: ps-web
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/pimplesaudagar_dev?schema=public
+      - REDIS_URL=redis://redis:6379
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - APP_SECRET=development_secret_must_be_at_least_32_characters_long_ps_dir
+      - CRON_SECRET=dev_cron_secret_key_12345
+      - NEXT_PUBLIC_STORAGE_PUBLIC_URL=http://localhost:9000/pimple-saudagar-media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     container_name: ps-postgres
@@ -32,7 +58,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
     container_name: ps-minio
     restart: always
     ports:

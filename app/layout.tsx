@@ -1,13 +1,6 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { SkipLink } from "@/components/ui/skip-link";
 import "./globals.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
-});
 
 export const metadata: Metadata = {
   title: "Pimple Saudagar Local Business Directory | Find Top Services Nearby",
@@ -26,7 +19,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en">
       <body className="min-h-screen bg-background font-sans antialiased selection:bg-primary/20">
         <SkipLink />
         <div id="main-content" tabIndex={-1} className="focus:outline-none">
